@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JIT Access</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-brand">
+    <span class="brand-mark">JIT</span>
+    <span class="brand-name">Access</span>
+  </div>
+  <div class="topbar-user" id="topbarUser" hidden>
+    <span class="user-email" id="userEmail"></span>
+    <button class="btn-ghost" id="logoutBtn">Se déconnecter</button>
+  </div>
+</div>
+
+<main class="stage">
+
+  <!-- ÉTAT 1 : non connecté -->
+  <section class="panel" id="viewLogin">
+    <p class="eyebrow">Portail de demande d'accès</p>
+    <h1>Un accès temporaire,<br>jamais permanent.</h1>
+    <p class="lede">Connecte-toi pour demander un rôle AWS limité dans le temps, justifié par un ticket et confirmé par une double authentification.</p>
+    <button class="btn-primary" id="loginBtn">Se connecter avec Keycloak</button>
+  </section>
+
+  <!-- ÉTAT 2 : connecté, formulaire de demande -->
+  <section class="panel" id="viewForm" hidden>
+    <p class="eyebrow">Nouvelle demande</p>
+    <h1>Quel accès te faut-il ?</h1>
+
+    <div class="rail" id="rail">
+      <div class="rail-step" data-step="ticket">
+        <span class="rail-dot"></span>
+        <span class="rail-label">Ticket</span>
+      </div>
+      <div class="rail-step" data-step="policy">
+        <span class="rail-dot"></span>
+        <span class="rail-label">Politique</span>
+      </div>
+      <div class="rail-step" data-step="mfa">
+        <span class="rail-dot"></span>
+        <span class="rail-label">MFA</span>
+      </div>
+      <div class="rail-step" data-step="granted">
+        <span class="rail-dot"></span>
+        <span class="rail-label">Accès</span>
+      </div>
+    </div>
+
+    <form id="requestForm">
+      <label class="field">
+        <span class="field-label">Rôle temporaire demandé</span>
+        <select id="requestedRole" required>
+          <option value="" disabled selected>Choisir un rôle…</option>
+          <option value="s3-write-access">Écriture S3 (s3-write-access)</option>
+          <option value="s3-read-access">Lecture S3 (s3-read-access)</option>
+          <option value="ec2-session-access">Session EC2 (ec2-session-access)</option>
+        </select>
+      </label>
+
+      <label class="field">
+        <span class="field-label">Ressource cible</span>
+        <input type="text" id="resourceName" placeholder="ex. mon-projet-jit-bucket" required>
+      </label>
+
+      <label class="field">
+        <span class="field-label">Ticket Jira</span>
+        <input type="text" id="ticketId" placeholder="ex. JIT-1" required>
+      </label>
+
+      <label class="field">
+        <span class="field-label">Durée (minutes)</span>
+        <input type="number" id="durationMinutes" value="120" min="1" max="240" required>
+      </label>
+
+      <button class="btn-primary" type="submit" id="submitRequestBtn">Envoyer la demande</button>
+    </form>
+
+    <p class="status-line" id="formStatus"></p>
+  </section>
+
+  <!-- ÉTAT 3 : MFA -->
+  <section class="panel" id="viewMfa" hidden>
+    <p class="eyebrow">Dernière étape</p>
+    <h1>Confirme ton identité</h1>
+    <p class="lede">Ouvre Google Authenticator et entre le code affiché pour ce compte.</p>
+
+    <div class="enroll-box" id="enrollBox" hidden>
+      <p class="field-label">Première connexion : scanne ce code</p>
+      <div class="qr-wrap">
+        <div id="qrCanvas"></div>
+      </div>
+      <p class="hint">Ouvre Google Authenticator, appuie sur "+", puis "Scanner un code QR".</p>
+    </div>
+
+    <form id="mfaForm">
+      <label class="field">
+        <span class="field-label">Code à 6 chiffres</span>
+        <input type="text" id="otpCode" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="000000" required>
+      </label>
+      <button class="btn-primary" type="submit" id="verifyMfaBtn">Confirmer</button>
+    </form>
+
+    <p class="status-line" id="mfaStatus"></p>
+  </section>
+
+  <!-- ÉTAT 4 : accès accordé -->
+  <section class="panel" id="viewGranted" hidden>
+    <p class="eyebrow status-eyebrow-ok">Accès accordé</p>
+    <h1>C'est bon, tu peux y aller.</h1>
+    <p class="lede">Ces identifiants expirent automatiquement à la fin de la durée demandée.</p>
+
+    <p>PowerShell a été ouvert automatiquement avec la session AWS temporaire. </p>
+    <div class="creds-box">
+      <div class="creds-row">
+        <span class="creds-key">Expire le</span>
+        <span class="creds-value mono-line" id="credExpiration"></span>
+      </div>
+    </div>
+
+    <button class="btn-ghost" id="newRequestBtn">Faire une nouvelle demande</button>
+  </section>
+
+  <!-- ÉTAT : refus -->
+  <section class="panel" id="viewDenied" hidden>
+    <p class="eyebrow status-eyebrow-danger">Demande refusée</p>
+    <h1>Cette demande ne passe pas.</h1>
+    <p class="lede" id="deniedReason"></p>
+    <button class="btn-ghost" id="retryBtn">Faire une nouvelle demande</button>
+  </section>
+
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/keycloak-js@25.0.6/dist/keycloak.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

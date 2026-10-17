@@ -1,0 +1,76 @@
+version: '3.8'
+
+services:
+  keycloak-db:
+    image: postgres:16
+    container_name: keycloak-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: keycloak_password
+    volumes:
+      - keycloak_db_data:/var/lib/postgresql/data
+    networks:
+      - jit-network
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0
+    container_name: keycloak
+    restart: unless-stopped
+    command: start-dev
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: keycloak_password
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin_password
+      KC_HOSTNAME: localhost
+      KC_HOSTNAME_STRICT: "false"
+      KC_HOSTNAME_STRICT_HTTPS: "false"
+      KC_HTTP_ENABLED: "true"
+    ports:
+      - "8080:8080"
+    depends_on:
+      - keycloak-db
+    networks:
+      - jit-network
+
+  
+  opa:
+    image: openpolicyagent/opa:latest
+    container_name: opa
+    restart: unless-stopped
+    command: ["run", "--server", "--addr=:8181", "/policies"]
+    ports:
+      - "8181:8181"
+    volumes:
+      - ./opa/policies:/policies
+    networks:
+      - jit-network
+  
+  splunk:
+    image: splunk/splunk:latest
+    container_name: splunk
+    restart: unless-stopped
+    environment:
+      SPLUNK_GENERAL_TERMS: "--accept-sgt-current-at-splunk-com"
+      SPLUNK_START_ARGS: "--accept-license"
+      SPLUNK_PASSWORD: "ooomt54!!HT"
+      SPLUNK_HEC_TOKEN: "00000000-0000-0000-0000-000000000000"
+    ports:
+      - "8001:8000"     # Interface web Splunk 
+      - "8088:8088"     # HTTP Event Collector
+    networks:
+      - jit-network
+  
+
+
+
+networks:
+  jit-network:
+    driver: bridge
+
+volumes:
+  keycloak_db_data:
